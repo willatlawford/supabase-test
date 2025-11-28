@@ -11,18 +11,18 @@ A React + TypeScript todo application with an integrated AI chat agent that can 
 
 ## Tech Stack
 
-### Frontend
+### Frontend (`/src`)
 - React 18 + TypeScript
 - Vite
 - Tailwind CSS v4
 - Supabase JS Client
 - TanStack Query (React Query) backed by Supabase queries
 
-### Database
+### Database (`/supabase`)
 - Supabase (PostgreSQL)
 - Supabase Realtime for live updates
 
-### Agent Server
+### Agent Server (`/server`)
 - Node.js
 - Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`)
 - MCP (Model Context Protocol) tools
