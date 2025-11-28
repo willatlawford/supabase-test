@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTodos } from './hooks/useTodos'
 import { useCategories } from './hooks/useCategories'
+import { useRealtimeSync } from './hooks/useRealtimeSync'
 import { TodoList } from './components/TodoList'
 import { AddTodo } from './components/AddTodo'
 import { CategoryManager } from './components/CategoryManager'
@@ -10,6 +11,7 @@ import { Chat } from './components/Chat'
 type Tab = 'todos' | 'chat'
 
 function App() {
+  useRealtimeSync() // Sync external DB changes (e.g., from chat agent)
   const [activeTab, setActiveTab] = useState<Tab>('todos')
   const { todos, loading: todosLoading, addTodo, toggleTodo, deleteTodo } = useTodos()
   const { categories, loading: categoriesLoading, addCategory, deleteCategory } = useCategories()
