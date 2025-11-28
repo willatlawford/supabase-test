@@ -1,11 +1,15 @@
 import 'dotenv/config'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { createClient, RealtimeChannel } from '@supabase/supabase-js'
+import { createTodoTools } from './tools'
 
 const SUPABASE_URL = process.env.SUPABASE_URL!
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY!
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+// Create MCP server with todo tools
+const todoMcpServer = createTodoTools(supabase)
 
 // Map client session IDs to Claude SDK session IDs
 const sessionMap = new Map<string, string>()
@@ -22,8 +26,20 @@ async function handleUserMessage(channel: RealtimeChannel, payload: { clientSess
       prompt: message,
       options: {
         model: 'claude-sonnet-4-20250514',
-        systemPrompt: 'You are a helpful assistant. Respond concisely and helpfully.',
-        allowedTools: [],
+        systemPrompt: `You are a helpful assistant that can manage todos.
+Use the ListTodos, AddTodo, DeleteTodo, and ToggleTodo tools to help users manage their tasks.
+When listing todos, present them in a readable format.
+Respond concisely and helpfully.`,
+        mcpServers: {
+          todos: todoMcpServer
+        },
+        // Allow specific MCP tools
+        allowedTools: [
+          'mcp__todos__ListTodos',
+          'mcp__todos__AddTodo',
+          'mcp__todos__DeleteTodo',
+          'mcp__todos__ToggleTodo'
+        ],
         ...(sdkSessionId && { resume: sdkSessionId })
       }
     })
@@ -31,6 +47,9 @@ async function handleUserMessage(channel: RealtimeChannel, payload: { clientSess
     let fullContent = ''
 
     for await (const msg of result) {
+      // Log all messages for debugging
+      console.log(`[${clientSessionId}] MSG:`, msg.type, msg.subtype || '', JSON.stringify(msg).slice(0, 200))
+
       // Capture SDK session ID from init message
       if (msg.type === 'system' && msg.subtype === 'init') {
         sessionMap.set(clientSessionId, msg.session_id)
