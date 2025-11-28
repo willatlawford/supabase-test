@@ -1,73 +1,194 @@
-# React + TypeScript + Vite
+# Supabase Todo App with AI Chat Agent
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A React + TypeScript todo application with an integrated AI chat agent that can manage your todos. Uses Supabase for storage and real-time synchronization.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **Todo Management**: Create, complete, and delete todos with category support
+- **Category System**: Organize todos by custom categories
+- **AI Chat Agent**: Chat with Claude to manage your todos using natural language
+- **Real-time Sync**: UI updates automatically when the agent modifies data
 
-## React Compiler
+## Tech Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### Frontend
+- React 18 + TypeScript
+- Vite
+- Tailwind CSS v4
+- Supabase JS Client
+- TanStack Query (React Query) backed by Supabase queries
 
-## Expanding the ESLint configuration
+### Database
+- Supabase (PostgreSQL)
+- Supabase Realtime for live updates
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Agent Server
+- Node.js
+- Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`)
+- MCP (Model Context Protocol) tools
+- Supabase Realtime Broadcast
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## Architecture
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+```mermaid
+flowchart TB
+    subgraph Frontend["Frontend (React)"]
+        TQ["TanStack Query<br/>useTodos, useCategories"]
+        Chat["Chat UI<br/>useChat hook"]
+    end
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+    subgraph Supabase["Supabase"]
+        subgraph RT["Realtime"]
+            BC["chat channel"]
+            PC["db-changes channel"]
+        end
+        DB[(PostgreSQL<br/>todos, categories)]
+    end
+
+    subgraph Server["Agent Server (Node.js)"]
+        SDK["Claude Agent SDK"]
+        MCP["MCP Tools<br/>ListTodos, AddTodo<br/>DeleteTodo, ToggleTodo"]
+    end
+
+    %% Chat flow via Broadcast
+    Chat <--> BC
+    BC <--> SDK
+
+    %% DB operations
+    TQ <-->|"REST API"| DB
+    MCP -->|"Insert/Update/Delete"| DB
+
+    %% Realtime DB sync
+    DB --> PC
+    PC -->|"Invalidate queries"| TQ
+
+    %% Internal server
+    SDK --- MCP
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Real-time Flows
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+**Chat Messages (Broadcast)**
+1. User sends message → Frontend publishes to Supabase Broadcast channel
+2. Agent server receives message via Broadcast subscription
+3. Claude processes and responds
+4. Server publishes response to Broadcast channel
+5. Frontend receives and displays response
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+**Database Sync (Postgres Changes)**
+1. Agent modifies todos via MCP tools → Supabase DB updated
+2. Supabase Realtime detects change → publishes Postgres Changes event
+3. Frontend receives event → TanStack Query invalidates cache → UI refreshes
+
+## Prerequisites
+
+- Node.js 18+
+- Docker (for local Supabase)
+- Anthropic API key
+
+## Setup
+
+### 1. Install Dependencies
+
+```bash
+# Frontend dependencies
+npm install
+
+# Server dependencies
+cd server && npm install && cd ..
 ```
+
+### 2. Start Supabase
+
+```bash
+npx supabase start
+```
+
+This will output connection details. Note the `API URL` and `anon key`.
+
+### 3. Configure Environment
+
+Create `.env` in the project root:
+
+```env
+VITE_SUPABASE_URL=http://127.0.0.1:54321
+VITE_SUPABASE_ANON_KEY=<your-anon-key>
+```
+
+Create `server/.env`:
+
+```env
+ANTHROPIC_API_KEY=<your-anthropic-api-key>
+SUPABASE_URL=http://127.0.0.1:54321
+SUPABASE_ANON_KEY=<your-anon-key>
+```
+
+### 4. Run Database Migrations
+
+Migrations run automatically when Supabase starts. To reset:
+
+```bash
+npx supabase db reset
+```
+
+## Running the App
+
+### Start the Agent Server
+
+```bash
+cd server && npm run dev
+```
+
+Server runs on `http://localhost:3001`
+
+### Start the Frontend
+
+```bash
+npm run dev
+```
+
+Frontend runs on `http://localhost:5173`
+
+## MCP Tools
+
+The AI agent has access to these tools for managing todos:
+
+| Tool | Description |
+|------|-------------|
+| `ListTodos` | List all todos, optionally filtered by category or completion status |
+| `AddTodo` | Create a new todo with optional category |
+| `DeleteTodo` | Delete a todo by ID |
+| `ToggleTodo` | Mark a todo as complete or incomplete |
+
+## Usage
+
+1. **Todos Tab**: Manually create and manage todos with categories
+2. **Chat Tab**: Talk to the AI agent to manage todos:
+   - "Show me all my todos"
+   - "Add a todo to buy groceries"
+   - "Mark the first todo as complete"
+   - "Delete all completed todos"
+
+## Project Structure
+
+```
+.
+├── src/
+│   ├── components/       # React components
+│   ├── hooks/            # Custom hooks (useTodos, useCategories, useChat, useRealtimeSync)
+│   ├── lib/              # Supabase client
+│   ├── types/            # TypeScript types
+│   └── App.tsx           # Main app component
+├── server/
+│   ├── index.ts          # Agent server with Claude Agent SDK
+│   └── tools.ts          # MCP tool definitions
+├── supabase/
+│   └── migrations/       # Database migrations
+└── package.json
+```
+
+## Development Notes
+
+- **Zod Version**: The Claude Agent SDK requires Zod v3 (not v4). The server uses `zod@3`.
+- **Tool Permissions**: MCP tools use explicit `allowedTools` array for security.
+- **Session Management**: Chat sessions are maintained using the SDK's `resume` option.
