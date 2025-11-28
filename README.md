@@ -55,7 +55,7 @@ flowchart TB
     BC <--> SDK
 
     %% DB operations
-    TQ <-->|"REST API"| DB
+    TQ <-->|"Insert/Update/Delete"| DB
     MCP -->|"Insert/Update/Delete"| DB
 
     %% Realtime DB sync
