@@ -9,15 +9,23 @@ export interface ChatMessage {
   timestamp: Date
 }
 
-export function useChat() {
+interface UseChatOptions {
+  userId: string
+  accessToken: string
+}
+
+export function useChat({ userId, accessToken }: UseChatOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const clientSessionId = useRef(crypto.randomUUID())
   const channelRef = useRef<RealtimeChannel | null>(null)
-  const pendingMessageRef = useRef<string | null>(null)
+  const connectChannelRef = useRef<RealtimeChannel | null>(null)
 
   useEffect(() => {
-    const channel = supabase.channel('chat', {
+    if (!userId || !accessToken) return
+
+    // Subscribe to user-specific channel
+    const channel = supabase.channel(`chat:${userId}`, {
       config: { broadcast: { self: false } }
     })
 
@@ -28,7 +36,6 @@ export function useChat() {
       if (payload.done) {
         // Message complete
         setIsLoading(false)
-        pendingMessageRef.current = null
 
         // Update or add the final message
         setMessages(prev => {
@@ -66,16 +73,36 @@ export function useChat() {
       }
     })
 
-    channel.subscribe((status) => {
-      console.log('Chat channel status:', status)
+    channel.subscribe(async (status) => {
+      console.log(`Chat channel (chat:${userId}) status:`, status)
+
+      if (status === 'SUBSCRIBED') {
+        // Tell the server to subscribe to this user's channel
+        const connectChannel = supabase.channel('chat:connect', {
+          config: { broadcast: { self: false } }
+        })
+
+        connectChannel.subscribe(async (connectStatus) => {
+          if (connectStatus === 'SUBSCRIBED') {
+            await connectChannel.send({
+              type: 'broadcast',
+              event: 'connect',
+              payload: { userId, accessToken }
+            })
+          }
+        })
+
+        connectChannelRef.current = connectChannel
+      }
     })
 
     channelRef.current = channel
 
     return () => {
       channel.unsubscribe()
+      connectChannelRef.current?.unsubscribe()
     }
-  }, [])
+  }, [userId, accessToken])
 
   const sendMessage = useCallback(async (content: string) => {
     if (!content.trim() || isLoading) return
@@ -90,16 +117,17 @@ export function useChat() {
     setMessages(prev => [...prev, userMessage])
     setIsLoading(true)
 
-    // Send to server via broadcast
+    // Send to server via broadcast (include accessToken for verification)
     await channelRef.current?.send({
       type: 'broadcast',
       event: 'user_message',
       payload: {
         clientSessionId: clientSessionId.current,
-        message: content.trim()
+        message: content.trim(),
+        accessToken
       }
     })
-  }, [isLoading])
+  }, [isLoading, accessToken])
 
   const clearMessages = useCallback(() => {
     setMessages([])

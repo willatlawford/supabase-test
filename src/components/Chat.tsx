@@ -1,10 +1,15 @@
 import { useEffect, useRef } from 'react'
+import { useAuth } from '../contexts/AuthContext'
 import { useChat } from '../hooks/useChat'
 import { ChatMessage } from './ChatMessage'
 import { ChatInput } from './ChatInput'
 
 export function Chat() {
-  const { messages, sendMessage, isLoading, clearMessages } = useChat()
+  const { user, session } = useAuth()
+  const { messages, sendMessage, isLoading, clearMessages } = useChat({
+    userId: user?.id ?? '',
+    accessToken: session?.access_token ?? ''
+  })
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {

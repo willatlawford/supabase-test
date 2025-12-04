@@ -1,9 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
 import type { Category } from '../types/database'
 
 export function useCategories() {
   const queryClient = useQueryClient()
+  const { user } = useAuth()
 
   const { data: categories = [], isLoading } = useQuery({
     queryKey: ['categories'],
@@ -14,14 +16,16 @@ export function useCategories() {
         .order('created_at', { ascending: true })
       if (error) throw error
       return data || []
-    }
+    },
+    enabled: !!user
   })
 
   const addMutation = useMutation({
     mutationFn: async (name: string) => {
+      if (!user) throw new Error('Not authenticated')
       const { data, error } = await supabase
         .from('categories')
-        .insert({ name })
+        .insert({ name, user_id: user.id })
         .select()
         .single()
       if (error) throw error

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useAuth } from './contexts/AuthContext'
 import { useTodos } from './hooks/useTodos'
 import { useCategories } from './hooks/useCategories'
 import { useRealtimeSync } from './hooks/useRealtimeSync'
@@ -7,11 +8,13 @@ import { AddTodo } from './components/AddTodo'
 import { CategoryManager } from './components/CategoryManager'
 import { CategorySelect } from './components/CategorySelect'
 import { Chat } from './components/Chat'
+import { Auth } from './components/Auth'
 
 type Tab = 'todos' | 'chat'
 
 function App() {
-  useRealtimeSync() // Sync external DB changes (e.g., from chat agent)
+  const { user, session, loading: authLoading, signOut } = useAuth()
+  useRealtimeSync(user?.id) // Sync external DB changes (e.g., from chat agent)
   const [activeTab, setActiveTab] = useState<Tab>('todos')
   const { todos, loading: todosLoading, addTodo, toggleTodo, deleteTodo } = useTodos()
   const { categories, loading: categoriesLoading, addCategory, deleteCategory } = useCategories()
@@ -19,10 +22,33 @@ function App() {
 
   const loading = todosLoading || categoriesLoading
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-gray-500">Loading...</div>
+      </div>
+    )
+  }
+
+  if (!user || !session) {
+    return <Auth />
+  }
+
   return (
     <div className="min-h-screen bg-gray-100 py-8">
       <div className="max-w-2xl mx-auto px-4">
-        <h1 className="text-3xl font-bold text-gray-900 mb-6">Supabase App</h1>
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-3xl font-bold text-gray-900">Supabase App</h1>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-600">{user.email}</span>
+            <button
+              onClick={() => signOut()}
+              className="text-sm text-gray-600 hover:text-gray-900"
+            >
+              Sign Out
+            </button>
+          </div>
+        </div>
 
         {/* Tab navigation */}
         <div className="flex gap-1 mb-6 bg-gray-200 p-1 rounded-lg">
