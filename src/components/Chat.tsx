@@ -7,7 +7,7 @@ import { ChatInput } from './ChatInput'
 export function Chat() {
   const { session } = useAuth()
 
-  const { messages, sendMessage, clearMessages, error, connectionState } = useChat({
+  const { messages, sendMessage, clearMessages, error, connectionState, lostConnection, connect } = useChat({
     accessToken: session?.access_token ?? '',
     workerUrl: import.meta.env.VITE_CLOUDFLARE_WORKER_URL || 'http://localhost:8789'
   })
@@ -22,15 +22,13 @@ export function Chat() {
   const connectionStatusColor = {
     disconnected: 'bg-red-500',
     connecting: 'bg-yellow-500',
-    connected: 'bg-green-500',
-    reconnecting: 'bg-yellow-500'
+    connected: 'bg-green-500'
   }[connectionState]
 
   const connectionStatusText = {
     disconnected: 'Disconnected',
     connecting: 'Connecting...',
-    connected: 'Connected',
-    reconnecting: 'Reconnecting...'
+    connected: 'Connected'
   }[connectionState]
 
   return (
@@ -57,6 +55,18 @@ export function Chat() {
         </div>
       )}
 
+      {lostConnection && (
+        <div className="mb-2 p-3 bg-amber-50 border border-amber-300 rounded flex items-center justify-between">
+          <span className="text-amber-800">Connection lost. The container may have stopped.</span>
+          <button
+            onClick={connect}
+            className="px-3 py-1 bg-amber-600 text-white rounded hover:bg-amber-700 text-sm"
+          >
+            Reconnect
+          </button>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto bg-white rounded-lg border border-gray-200 p-4 mb-4">
         {messages.length === 0 ? (
           <div className="h-full flex items-center justify-center text-gray-400">
@@ -72,7 +82,11 @@ export function Chat() {
         )}
       </div>
 
-      <ChatInput onSend={sendMessage} disabled={connectionState !== 'connected'} />
+      <ChatInput
+        onSend={sendMessage}
+        disabled={connectionState !== 'connected'}
+        loading={connectionState === 'connecting'}
+      />
     </div>
   )
 }

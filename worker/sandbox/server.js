@@ -332,10 +332,12 @@ Respond concisely and helpfully.`,
     console.error('WebSocket error:', err);
   });
 
-  // Keep connection alive with ping/pong
+  // Keep connection alive with ping/pong and app-level heartbeat
   const pingInterval = setInterval(() => {
     if (ws.readyState === 1) {
       ws.ping();
+      // Also send app-level heartbeat so client can detect stale connection
+      safeSend({ type: 'heartbeat' });
     } else {
       clearInterval(pingInterval);
     }
