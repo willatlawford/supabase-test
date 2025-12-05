@@ -1,0 +1,12 @@
+{
+  "name": "chat-agent-container",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.9",
+    "@supabase/supabase-js": "^2.47.10",
+    "ws": "^8.18.0",
+    "zod": "^3.25.76"
+  }
+}

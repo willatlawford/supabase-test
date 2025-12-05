@@ -1,0 +1,9 @@
+# Cloudflare Worker environment variables for local development
+# Copy this to .dev.vars and fill in your values
+
+# Anthropic API key for Claude Agent SDK
+ANTHROPIC_API_KEY=your-anthropic-api-key
+
+# Supabase configuration (use local Supabase: npx supabase start)
+SUPABASE_URL=http://127.0.0.1:54321
+SUPABASE_ANON_KEY=your-supabase-anon-key
