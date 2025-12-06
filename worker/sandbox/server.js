@@ -219,7 +219,8 @@ Respond concisely and helpfully.`,
             'mcp__todos__ListTodos',
             'mcp__todos__AddTodo',
             'mcp__todos__DeleteTodo',
-            'mcp__todos__ToggleTodo'
+            'mcp__todos__ToggleTodo',
+            "Skill", "Read", "Write", "Edit", "WebSearch"
           ],
           maxTurns: 100
         }
@@ -230,8 +231,26 @@ Respond concisely and helpfully.`,
         console.log('Agent message:', msg.type, msg.subtype || '');
 
         if (msg.type === 'assistant') {
-          const content = extractContent(msg);
-          if (content) {
+          // Check for tool_use blocks in the message content
+          const content = msg.message?.content;
+          if (Array.isArray(content)) {
+            for (const block of content) {
+              if (block.type === 'tool_use') {
+                console.log('Sending tool_use:', block.name);
+                safeSend({
+                  type: 'tool_use',
+                  toolName: block.name,
+                  toolInput: block.input
+                });
+              } else if (block.type === 'text' && block.text) {
+                console.log('Sending assistant response:', block.text.substring(0, 100) + '...');
+                safeSend({
+                  type: 'assistant_message',
+                  content: block.text
+                });
+              }
+            }
+          } else if (typeof content === 'string' && content) {
             console.log('Sending assistant response:', content.substring(0, 100) + '...');
             safeSend({
               type: 'assistant_message',

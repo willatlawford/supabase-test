@@ -11,11 +11,11 @@ npm run build    # TypeScript check + Vite build
 npm run lint     # ESLint
 ```
 
-### Agent Server (`/server`)
+### Cloudflare Worker (`/worker`)
 ```bash
-cd server && npm run dev   # Start with hot reload (localhost:3001)
-cd server && npm start     # Start without hot reload
+cd worker && npm run dev   # Start worker + container (localhost:8789)
 ```
+**Note**: Docker must be running for containers to work.
 
 ### Supabase
 ```bash
@@ -26,26 +26,49 @@ npx supabase db reset # Reset database and rerun migrations
 
 ## Architecture
 
-This is a todo app with an AI chat agent that can manage todos. It has three main parts:
+This is a todo app with an AI chat agent that can manage todos. It has four main parts:
 
 1. **Frontend** (`/src`) - React + TanStack Query + Tailwind CSS v4
-2. **Agent Server** (`/server`) - Claude Agent SDK with MCP tools
-3. **Database** (`/supabase`) - PostgreSQL via Supabase with Realtime
+2. **Cloudflare Worker** (`/worker/src/index.ts`) - Auth verification, WebSocket forwarding
+3. **Agent Container** (`/worker/sandbox/`) - Claude Agent SDK with MCP tools
+4. **Database** (`/supabase`) - PostgreSQL via Supabase
 
-### Real-time Communication
+### Chat Architecture
 
-- **Chat**: Uses Supabase Broadcast channel for bidirectional messaging between frontend and agent server
-- **Data sync**: Supabase Postgres Changes events trigger TanStack Query invalidation
+```
+Frontend (React) <--WebSocket--> Cloudflare Worker <--WebSocket--> Container (Agent)
+```
+
+- **WebSocket connection** for bidirectional real-time chat
+- **Per-user containers** - each authenticated user gets their own container instance
+- **Container lifecycle** - sleeps after 5 minutes of inactivity, wakes on request
+- **Stale detection** - frontend detects dead connections after 45s of no heartbeat
+- **Manual reconnect** - user clicks button to reconnect (no auto-reconnect after disconnect)
 
 ### Key Files
 
-- `src/hooks/useChat.ts` - Chat state and Broadcast channel subscription
-- `src/hooks/useRealtimeSync.ts` - Postgres Changes listener that invalidates TanStack Query
-- `src/hooks/useTodos.ts`, `src/hooks/useCategories.ts` - TanStack Query hooks wrapping Supabase queries
-- `server/index.ts` - Agent server entry, Claude SDK setup, Broadcast listener
-- `server/tools.ts` - MCP tool definitions (ListTodos, AddTodo, DeleteTodo, ToggleTodo)
+#### Worker (`/worker`)
+- `src/index.ts` - Cloudflare Worker entry, JWT auth via Supabase, WebSocket forwarding to container
+- `sandbox/server.js` - Agent server with WebSocket, Claude Agent SDK, MCP tools
+- `sandbox/package.json` - Container dependencies (claude-agent-sdk, ws, zod)
+- `wrangler.jsonc` - Cloudflare configuration (containers, R2, durable objects)
+- `Dockerfile` - Container image based on `cloudflare/sandbox`
+
+#### Frontend (`/src`)
+- `hooks/useChat.ts` - WebSocket connection management, stale detection, reconnection logic
+- `components/Chat.tsx` - Chat UI with connection status indicator and reconnect banner
+- `components/ChatInput.tsx` - Message input with loading/disabled states
+- `hooks/useRealtimeSync.ts` - Postgres Changes listener for TanStack Query invalidation
+- `hooks/useTodos.ts`, `hooks/useCategories.ts` - TanStack Query hooks for Supabase
+
+### MCP Tools (defined in `worker/sandbox/server.js`)
+- `ListTodos` - List todos with optional filters
+- `AddTodo` - Create a new todo
+- `DeleteTodo` - Delete a todo by ID
+- `ToggleTodo` - Toggle completion status
 
 ## Important Notes
 
-- **Zod version**: Server uses Zod v3 (required by Claude Agent SDK), not v4
-- **Separate node_modules**: Frontend and server have independent dependencies
+- **Zod version**: Container uses Zod v3 (required by Claude Agent SDK), not v4
+- **Separate node_modules**: Frontend, worker, and sandbox have independent dependencies
+- **Environment variables**: Worker needs `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `ANTHROPIC_API_KEY`

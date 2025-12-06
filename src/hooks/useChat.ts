@@ -2,9 +2,11 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 
 export interface ChatMessage {
   id: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'tool_use'
   content: string
   timestamp: Date
+  toolName?: string
+  toolInput?: Record<string, unknown>
 }
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected'
@@ -15,11 +17,13 @@ interface UseChatOptions {
 }
 
 interface ServerMessage {
-  type: 'ready' | 'session_init' | 'assistant_message' | 'error' | 'status' | 'heartbeat'
+  type: 'ready' | 'session_init' | 'assistant_message' | 'tool_use' | 'error' | 'status' | 'heartbeat'
   sessionId?: string
   content?: string
   message?: string
   status?: string
+  toolName?: string
+  toolInput?: Record<string, unknown>
 }
 
 export function useChat({
@@ -96,6 +100,16 @@ export function useChat({
               role: 'assistant',
               content: data.content || '',
               timestamp: new Date()
+            }])
+            break
+          case 'tool_use':
+            setMessages(prev => [...prev, {
+              id: crypto.randomUUID(),
+              role: 'tool_use',
+              content: '',
+              timestamp: new Date(),
+              toolName: data.toolName,
+              toolInput: data.toolInput
             }])
             break
           case 'error':
