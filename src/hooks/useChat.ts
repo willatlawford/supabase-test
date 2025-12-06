@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 
 export interface ChatMessage {
   id: string
-  role: 'user' | 'assistant' | 'tool_use'
+  role: 'user' | 'assistant' | 'tool_use' | 'slash_output'
   content: string
   timestamp: Date
   toolName?: string
@@ -17,7 +17,7 @@ interface UseChatOptions {
 }
 
 interface ServerMessage {
-  type: 'ready' | 'session_init' | 'assistant_message' | 'tool_use' | 'error' | 'status' | 'heartbeat'
+  type: 'ready' | 'session_init' | 'assistant_message' | 'tool_use' | 'slash_output' | 'error' | 'status' | 'heartbeat'
   sessionId?: string
   content?: string
   message?: string
@@ -110,6 +110,14 @@ export function useChat({
               timestamp: new Date(),
               toolName: data.toolName,
               toolInput: data.toolInput
+            }])
+            break
+          case 'slash_output':
+            setMessages(prev => [...prev, {
+              id: crypto.randomUUID(),
+              role: 'slash_output',
+              content: data.content || '',
+              timestamp: new Date()
             }])
             break
           case 'error':

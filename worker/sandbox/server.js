@@ -259,6 +259,21 @@ Respond concisely and helpfully.`,
           }
         }
 
+        // Check for slash command output in user messages
+        if (msg.type === 'user') {
+          const content = msg.message?.content;
+          if (typeof content === 'string') {
+            const match = content.match(/<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/);
+            if (match) {
+              console.log('Sending slash_output');
+              safeSend({
+                type: 'slash_output',
+                content: match[1].trim()
+              });
+            }
+          }
+        }
+
         if (msg.type === 'result') {
           console.log('Query result received');
         }

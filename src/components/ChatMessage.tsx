@@ -15,6 +15,7 @@ function formatToolName(name: string): string {
 export function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === 'user'
   const isToolUse = message.role === 'tool_use'
+  const isSlashOutput = message.role === 'slash_output'
 
   if (isToolUse) {
     return (
@@ -33,6 +34,27 @@ export function ChatMessage({ message }: ChatMessageProps) {
             </pre>
           )}
           <p className="text-xs mt-1 text-purple-400">
+            {message.timestamp.toLocaleTimeString()}
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  if (isSlashOutput) {
+    return (
+      <div className="flex justify-start">
+        <div className="max-w-[90%] rounded-lg px-3 py-2 bg-teal-50 border border-teal-200 text-teal-900 text-sm">
+          <div className="flex items-center gap-2 font-medium text-teal-700">
+            <svg className="w-4 h-4 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            Command Output
+          </div>
+          <pre className="mt-1 text-xs text-teal-800 bg-teal-100 rounded p-2 overflow-x-auto whitespace-pre-wrap">
+            {message.content}
+          </pre>
+          <p className="text-xs mt-1 text-teal-400">
             {message.timestamp.toLocaleTimeString()}
           </p>
         </div>
