@@ -107,8 +107,8 @@ jobs:
           # With runtime script injection, we can share the same container class across all PRs
           jq --arg pr "$PR_NUM" '
             .env["pr-" + $pr] = {
-              "name": "worker-pr-" + $pr,
-              "vars": { "ENVIRONMENT": "pr-" + $pr },
+              "name": ("worker-pr-" + $pr),
+              "vars": { "ENVIRONMENT": ("pr-" + $pr) },
               "containers": [{
                 "class_name": "AgentSandbox",
                 "image": "./Dockerfile",
@@ -117,7 +117,7 @@ jobs:
               }],
               "r2_buckets": [{
                 "binding": "SESSION_STORAGE",
-                "bucket_name": "chat-sessions-pr-" + $pr
+                "bucket_name": ("chat-sessions-pr-" + $pr)
               }],
               "durable_objects": {
                 "bindings": [{
