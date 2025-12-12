@@ -14,6 +14,14 @@
 		"enabled": true
 	},
 	/**
+	 * Static Assets - Serve the React frontend
+	 * https://developers.cloudflare.com/workers/static-assets/
+	 */
+	"assets": {
+		"directory": "../dist",
+		"binding": "ASSETS"
+	},
+	/**
 	 * Smart Placement
 	 * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
 	 */
@@ -45,7 +53,7 @@
 	// "services": [{ "binding": "MY_SERVICE", "service": "my-service" }]
 	"containers": [
 		{
-			"class_name": "ChatContainer",
+			"class_name": "AgentSandbox",
 			"image": "./Dockerfile",
 			"instance_type": "standard-1",
 			"max_instances": 10
@@ -54,23 +62,65 @@
 	"r2_buckets": [
 		{
 			"binding": "SESSION_STORAGE",
-			"bucket_name": "chat-sessions"
+			"bucket_name": "chat-sessions-dev"
 		}
 	],
 	"durable_objects": {
 		"bindings": [
 			{
-				"class_name": "ChatContainer",
-				"name": "CONTAINER"
+				"class_name": "AgentSandbox",
+				"name": "SANDBOX"
 			}
 		]
 	},
 	"migrations": [
 		{
 			"new_sqlite_classes": [
-				"ChatContainer"
+				"AgentSandbox"
 			],
-			"tag": "v2"
+			"tag": "v1"
 		}
-	]
+	],
+	/**
+	 * Environments
+	 * https://developers.cloudflare.com/workers/wrangler/environments/
+	 */
+	"env": {
+		"dev": {
+			"name": "worker-dev",
+			"vars": {
+				"ENVIRONMENT": "dev"
+			},
+			"containers": [
+				{
+					"class_name": "AgentSandbox",
+					"image": "./Dockerfile",
+					"instance_type": "standard-1",
+					"max_instances": 10
+				}
+			],
+			"r2_buckets": [
+				{
+					"binding": "SESSION_STORAGE",
+					"bucket_name": "chat-sessions-dev"
+				}
+			],
+			"durable_objects": {
+				"bindings": [
+					{
+						"class_name": "AgentSandbox",
+						"name": "SANDBOX"
+					}
+				]
+			},
+			"migrations": [
+				{
+					"new_sqlite_classes": [
+						"AgentSandbox"
+					],
+					"tag": "v1"
+				}
+			]
+		}
+	}
 }

@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
+import { useChannel, type ChannelMessage, type ChannelState } from './useChannel'
 
 export interface ChatMessage {
   id: string
@@ -9,21 +10,11 @@ export interface ChatMessage {
   toolInput?: Record<string, unknown>
 }
 
-export type ConnectionState = 'disconnected' | 'connecting' | 'connected'
+export type ConnectionState = ChannelState
 
 interface UseChatOptions {
   accessToken: string
   workerUrl?: string
-}
-
-interface ServerMessage {
-  type: 'ready' | 'session_init' | 'assistant_message' | 'tool_use' | 'slash_output' | 'error' | 'status' | 'heartbeat'
-  sessionId?: string
-  content?: string
-  message?: string
-  status?: string
-  toolName?: string
-  toolInput?: Record<string, unknown>
 }
 
 export function useChat({
@@ -31,141 +22,149 @@ export function useChat({
   workerUrl = 'http://localhost:8789'
 }: UseChatOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected')
+  const [chatError, setChatError] = useState<string | null>(null)
   const [lostConnection, setLostConnection] = useState(false)
+  const [sessionId] = useState(() => crypto.randomUUID())
 
-  const wsRef = useRef<WebSocket | null>(null)
-  const staleCheckRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const keepaliveRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const wasConnectedRef = useRef(false)
+  const isConnectingRef = useRef(false)
 
-  const connect = useCallback(() => {
-    if (!accessToken) return
-
-    // Already have an active connection
-    if (wsRef.current) {
-      const state = wsRef.current.readyState
-      if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) return
+  // Handle incoming messages from the channel
+  const handleMessage = useCallback((msg: ChannelMessage) => {
+    if (msg.type === 'assistant_message') {
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: msg.content || '',
+        timestamp: new Date()
+      }])
+    } else if (msg.type === 'tool_use') {
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        role: 'tool_use',
+        content: '',
+        timestamp: new Date(),
+        toolName: msg.toolName,
+        toolInput: msg.toolInput
+      }])
+    } else if (msg.type === 'slash_output') {
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        role: 'slash_output',
+        content: msg.content || '',
+        timestamp: new Date()
+      }])
+    } else if (msg.type === 'error') {
+      setChatError(msg.message || msg.content || 'Unknown error')
     }
+  }, [])
 
-    setConnectionState('connecting')
-    setError(null)
+  const handleReady = useCallback(() => {
+    console.log('Agent ready')
+    setChatError(null)
     setLostConnection(false)
+    wasConnectedRef.current = true
+  }, [])
 
-    const wsUrl = workerUrl.replace(/^http/, 'ws')
-    const url = new URL('/ws', wsUrl)
-    url.searchParams.set('token', accessToken)
+  const handleError = useCallback((message: string) => {
+    setChatError(message)
+  }, [])
 
-    const ws = new WebSocket(url.toString())
-    wsRef.current = ws
+  const {
+    state: connectionState,
+    error: channelError,
+    connect: connectChannel,
+    sendMessage: sendToChannel,
+    disconnect
+  } = useChannel({
+    onMessage: handleMessage,
+    onReady: handleReady,
+    onError: handleError,
+    readyTimeout: 30000
+  })
 
-    let lastActivity = Date.now()
-    let wasEverConnected = false
-
-    // Clear any existing stale check
-    if (staleCheckRef.current) {
-      clearInterval(staleCheckRef.current)
+  // Start keepalive interval
+  const startKeepalive = useCallback(() => {
+    if (keepaliveRef.current) {
+      clearInterval(keepaliveRef.current)
     }
-
-    staleCheckRef.current = setInterval(() => {
-      if (Date.now() - lastActivity > 45000) {
-        console.log('Connection stale (no activity for 45s)')
-        clearInterval(staleCheckRef.current!)
-        staleCheckRef.current = null
-        // Show banner immediately, don't wait for close event
-        setConnectionState('disconnected')
-        setLostConnection(true)
-        ws.close(4000, 'Stale connection')
-      }
-    }, 10000)
-
-    ws.onopen = () => {
-      lastActivity = Date.now()
-    }
-
-    ws.onmessage = (event) => {
-      lastActivity = Date.now()
+    keepaliveRef.current = setInterval(async () => {
       try {
-        const data: ServerMessage = JSON.parse(event.data)
-
-        switch (data.type) {
-          case 'ready':
-            console.log('Agent ready')
-            wasEverConnected = true
-            setConnectionState('connected')
-            setError(null)
-            break
-          case 'assistant_message':
-            setMessages(prev => [...prev, {
-              id: crypto.randomUUID(),
-              role: 'assistant',
-              content: data.content || '',
-              timestamp: new Date()
-            }])
-            break
-          case 'tool_use':
-            setMessages(prev => [...prev, {
-              id: crypto.randomUUID(),
-              role: 'tool_use',
-              content: '',
-              timestamp: new Date(),
-              toolName: data.toolName,
-              toolInput: data.toolInput
-            }])
-            break
-          case 'slash_output':
-            setMessages(prev => [...prev, {
-              id: crypto.randomUUID(),
-              role: 'slash_output',
-              content: data.content || '',
-              timestamp: new Date()
-            }])
-            break
-          case 'error':
-            setError(data.message || 'Unknown error')
-            break
-          case 'heartbeat':
-          case 'status':
-          case 'session_init':
-            // Handled silently
-            break
-        }
+        await fetch(`${workerUrl}/api/agent/keepalive`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`
+          },
+          body: JSON.stringify({ sessionId })
+        })
       } catch (e) {
-        console.error('Failed to parse message:', e)
+        console.log('Keepalive failed:', e)
       }
+    }, 30000)
+  }, [workerUrl, accessToken, sessionId])
+
+  // Stop keepalive interval
+  const stopKeepalive = useCallback(() => {
+    if (keepaliveRef.current) {
+      clearInterval(keepaliveRef.current)
+      keepaliveRef.current = null
     }
+  }, [])
 
-    ws.onerror = () => {
-      console.log('WebSocket error')
-    }
+  // Connect: subscribe to channel FIRST, then start sandbox
+  const connect = useCallback(async () => {
+    if (!accessToken) return
+    if (isConnectingRef.current) return
 
-    ws.onclose = (event) => {
-      console.log(`WebSocket closed (code: ${event.code})`)
+    isConnectingRef.current = true
+    setLostConnection(false)
+    setChatError(null)
 
-      // Only update state if this is still the current WebSocket
-      if (wsRef.current === ws) {
-        if (staleCheckRef.current) {
-          clearInterval(staleCheckRef.current)
-          staleCheckRef.current = null
-        }
-        wsRef.current = null
-        setConnectionState('disconnected')
+    try {
+      // 1. Subscribe to channel FIRST (so we don't miss 'ready' message)
+      console.log('Subscribing to channel:', sessionId)
+      await connectChannel(sessionId)
 
-        // Show reconnect banner only if we were actually connected
-        if (wasEverConnected) {
-          setLostConnection(true)
-        }
+      // 2. THEN call worker to start sandbox
+      console.log('Starting agent session:', sessionId)
+      const response = await fetch(`${workerUrl}/api/agent/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({ sessionId })
+      })
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        throw new Error(data.error || 'Failed to start agent')
       }
-    }
-  }, [accessToken, workerUrl])
 
-  const sendMessage = useCallback((content: string) => {
+      console.log('Agent session started')
+
+      // 3. Start keepalive interval
+      startKeepalive()
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to connect'
+      setChatError(message)
+      // Only show "lost connection" if we were previously connected
+      if (wasConnectedRef.current) {
+        setLostConnection(true)
+      }
+    } finally {
+      isConnectingRef.current = false
+    }
+  }, [accessToken, workerUrl, sessionId, connectChannel, startKeepalive])
+
+  const sendMessage = useCallback(async (content: string) => {
     if (!content.trim()) return
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      setError('Not connected')
-      return
-    }
 
-    setError(null)
+    setChatError(null)
+
+    // Add user message locally
     setMessages(prev => [...prev, {
       id: crypto.randomUUID(),
       role: 'user',
@@ -173,16 +172,39 @@ export function useChat({
       timestamp: new Date()
     }])
 
-    wsRef.current.send(JSON.stringify({
-      type: 'user_message',
-      content: content.trim()
-    }))
-  }, [])
+    // Send via channel
+    const success = await sendToChannel(content.trim())
+    if (!success) {
+      setChatError('Failed to send message')
+      return
+    }
+
+    // Send keepalive on every message
+    try {
+      await fetch(`${workerUrl}/api/agent/keepalive`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({ sessionId })
+      })
+    } catch (e) {
+      console.log('Keepalive failed:', e)
+    }
+  }, [sendToChannel, workerUrl, accessToken, sessionId])
 
   const clearMessages = useCallback(() => {
     setMessages([])
-    setError(null)
+    setChatError(null)
   }, [])
+
+  // Detect lost connection - only if we were previously connected
+  useEffect(() => {
+    if (connectionState === 'disconnected' && wasConnectedRef.current && !isConnectingRef.current) {
+      setLostConnection(true)
+    }
+  }, [connectionState])
 
   // Connect on mount
   useEffect(() => {
@@ -191,31 +213,28 @@ export function useChat({
     }
 
     return () => {
-      if (staleCheckRef.current) {
-        clearInterval(staleCheckRef.current)
-      }
-      if (wsRef.current) {
-        wsRef.current.close(1000, 'Component unmounting')
-      }
+      stopKeepalive()
+      disconnect()
+      isConnectingRef.current = false  // Reset so reconnect works after strict mode remount
     }
-  }, [accessToken, connect])
+  }, [accessToken, connect, disconnect, stopKeepalive])
 
   // Reconnect when tab becomes visible
   useEffect(() => {
     const handler = () => {
-      if (document.visibilityState === 'visible' && accessToken) {
+      if (document.visibilityState === 'visible' && accessToken && connectionState === 'disconnected') {
         connect()
       }
     }
     document.addEventListener('visibilitychange', handler)
     return () => document.removeEventListener('visibilitychange', handler)
-  }, [accessToken, connect])
+  }, [accessToken, connect, connectionState])
 
   return {
     messages,
     sendMessage,
     clearMessages,
-    error,
+    error: chatError || channelError,
     connectionState,
     lostConnection,
     connect

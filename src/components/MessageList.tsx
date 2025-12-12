@@ -1,7 +1,18 @@
-import type { ChatMessage as ChatMessageType } from '../hooks/useChat'
+import { useEffect, useRef } from 'react'
 
-interface ChatMessageProps {
-  message: ChatMessageType
+interface Message {
+  id: string
+  role?: 'user' | 'assistant' | 'tool_use' | 'slash_output'
+  type?: 'assistant_message' | 'tool_use' | 'slash_output' | 'error'
+  content: string
+  timestamp: Date
+  toolName?: string
+  toolInput?: Record<string, unknown>
+}
+
+interface MessageListProps {
+  messages: Message[]
+  emptyMessage?: string
 }
 
 function formatToolName(name: string): string {
@@ -12,10 +23,33 @@ function formatToolName(name: string): string {
   return toolName.replace(/([A-Z])/g, ' $1').trim()
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
-  const isUser = message.role === 'user'
-  const isToolUse = message.role === 'tool_use'
-  const isSlashOutput = message.role === 'slash_output'
+function MessageItem({ message }: { message: Message }) {
+  // Normalize role from either role or type field
+  const role = message.role || (message.type === 'assistant_message' ? 'assistant' : message.type)
+
+  const isUser = role === 'user'
+  const isToolUse = role === 'tool_use'
+  const isSlashOutput = role === 'slash_output'
+  const isError = message.type === 'error'
+
+  if (isError) {
+    return (
+      <div className="flex justify-start">
+        <div className="max-w-[80%] rounded-lg px-3 py-2 bg-red-50 border border-red-200 text-red-900 text-sm">
+          <div className="flex items-center gap-2 font-medium text-red-700">
+            <svg className="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Error
+          </div>
+          <p className="mt-1 text-red-800">{message.content}</p>
+          <p className="text-xs mt-1 text-red-400">
+            {message.timestamp.toLocaleTimeString()}
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   if (isToolUse) {
     return (
@@ -76,6 +110,31 @@ export function ChatMessage({ message }: ChatMessageProps) {
           {message.timestamp.toLocaleTimeString()}
         </p>
       </div>
+    </div>
+  )
+}
+
+export function MessageList({ messages, emptyMessage = 'No messages yet...' }: MessageListProps) {
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  if (messages.length === 0) {
+    return (
+      <div className="h-full flex items-center justify-center text-gray-400">
+        {emptyMessage}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {messages.map((message) => (
+        <MessageItem key={message.id} message={message} />
+      ))}
+      <div ref={messagesEndRef} />
     </div>
   )
 }

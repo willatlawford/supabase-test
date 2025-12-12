@@ -8,9 +8,10 @@ import { AddTodo } from './components/AddTodo'
 import { CategoryManager } from './components/CategoryManager'
 import { CategorySelect } from './components/CategorySelect'
 import { Chat } from './components/Chat'
+import { PromptPage } from './pages/PromptPage'
 import { Auth } from './components/Auth'
 
-type Tab = 'todos' | 'chat'
+type Tab = 'todos' | 'chat' | 'prompt'
 
 function App() {
   const { user, session, loading: authLoading, signOut } = useAuth()
@@ -72,6 +73,16 @@ function App() {
           >
             Chat
           </button>
+          <button
+            onClick={() => setActiveTab('prompt')}
+            className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'prompt'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Prompt
+          </button>
         </div>
 
         {/* Tab content */}
@@ -119,8 +130,10 @@ function App() {
               />
             )}
           </>
-        ) : (
+        ) : activeTab === 'chat' ? (
           <Chat />
+        ) : (
+          <PromptPage />
         )}
       </div>
     </div>

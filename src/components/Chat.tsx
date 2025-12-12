@@ -1,7 +1,6 @@
-import { useEffect, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { useChat } from '../hooks/useChat'
-import { ChatMessage } from './ChatMessage'
+import { MessageList } from './MessageList'
 import { ChatInput } from './ChatInput'
 
 export function Chat() {
@@ -12,11 +11,6 @@ export function Chat() {
     workerUrl: import.meta.env.VITE_CLOUDFLARE_WORKER_URL || 'http://localhost:8789'
   })
 
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
 
   // Connection status indicator
   const connectionStatusColor = {
@@ -57,7 +51,7 @@ export function Chat() {
 
       {lostConnection && (
         <div className="mb-2 p-3 bg-amber-50 border border-amber-300 rounded flex items-center justify-between">
-          <span className="text-amber-800">Connection lost. The container may have stopped.</span>
+          <span className="text-amber-800">Connection lost. The sandbox may have stopped.</span>
           <button
             onClick={connect}
             className="px-3 py-1 bg-amber-600 text-white rounded hover:bg-amber-700 text-sm"
@@ -68,18 +62,7 @@ export function Chat() {
       )}
 
       <div className="flex-1 overflow-y-auto bg-white rounded-lg border border-gray-200 p-4 mb-4">
-        {messages.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-gray-400">
-            Start a conversation...
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {messages.map((message) => (
-              <ChatMessage key={message.id} message={message} />
-            ))}
-            <div ref={messagesEndRef} />
-          </div>
-        )}
+        <MessageList messages={messages} emptyMessage="Start a conversation..." />
       </div>
 
       <ChatInput

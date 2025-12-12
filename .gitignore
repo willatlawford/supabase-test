@@ -37,3 +37,6 @@ supabase/.temp
 
 # TypeScript
 *.tsbuildinfo
+
+# Generated sandbox bundle (built from worker/sandbox/src/*.ts)
+worker/src/sandbox-bundle.json

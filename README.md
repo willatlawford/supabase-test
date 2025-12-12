@@ -1,6 +1,6 @@
 # Supabase Todo App with AI Chat Agent
 
-A React + TypeScript todo application with an integrated AI chat agent that can manage your todos. Uses Supabase for storage and real-time synchronization.
+A React + TypeScript todo application with an integrated AI chat agent that can manage your todos. Uses Supabase for storage/auth and Cloudflare Workers with Sandboxes for the AI agent.
 
 ## Features
 
@@ -8,6 +8,7 @@ A React + TypeScript todo application with an integrated AI chat agent that can 
 - **Category System**: Organize todos by custom categories
 - **AI Chat Agent**: Chat with Claude to manage your todos using natural language
 - **Real-time Sync**: UI updates automatically when the agent modifies data
+- **PR Preview Environments**: Full-stack ephemeral environments for each pull request
 
 ## Tech Stack
 
@@ -16,77 +17,69 @@ A React + TypeScript todo application with an integrated AI chat agent that can 
 - Vite
 - Tailwind CSS v4
 - Supabase JS Client
-- TanStack Query (React Query) backed by Supabase queries
+- TanStack Query (React Query)
+
+### Cloudflare Worker (`/worker`)
+- Cloudflare Workers with Sandboxes (containerized agent execution)
+- Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`)
+- MCP (Model Context Protocol) tools
+- Supabase Realtime for bidirectional messaging
 
 ### Database (`/supabase`)
 - Supabase (PostgreSQL)
+- Row Level Security (RLS) for multi-user isolation
 - Supabase Realtime for live updates
-
-### Agent Server (`/server`)
-- Node.js
-- Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`)
-- MCP (Model Context Protocol) tools
-- Supabase Realtime Broadcast
+- Database branching for PR previews
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    subgraph Frontend["Frontend (React)"]
-        TQ["TanStack Query<br/>useTodos, useCategories"]
-        Chat["Chat UI<br/>useChat hook"]
-    end
-
-    subgraph Supabase["Supabase"]
-        subgraph RT["Realtime"]
-            BC["chat channel"]
-            PC["db-changes channel"]
-        end
-        DB[(PostgreSQL<br/>todos, categories)]
-    end
-
-    subgraph Server["Agent Server (Node.js)"]
-        SDK["Claude Agent SDK"]
-        MCP["MCP Tools<br/>ListTodos, AddTodo<br/>DeleteTodo, ToggleTodo"]
-    end
-
-    %% Chat flow via Broadcast
-    Chat <--> BC
-    BC <--> SDK
-
-    %% DB operations
-    TQ <-->|"Insert/Update/Delete"| DB
-    MCP -->|"Insert/Update/Delete"| DB
-
-    %% Realtime DB sync
-    DB --> PC
-    PC -->|"Invalidate queries"| TQ
-
-    %% Internal server
-    SDK --- MCP
+```
+Frontend (React) <--Supabase Realtime Channel--> Sandbox (Agent)
+                           ^
+                           |
+              Worker (triggers sandbox, keepalive, timeout)
 ```
 
-### Real-time Flows
+- **Supabase Realtime Channels** for bidirectional messaging between frontend and agent
+- **Per-session sandboxes** - each chat session gets its own isolated container
+- **Two modes**: Interactive (multi-turn chat) and Non-interactive (single prompt)
 
-**Chat Messages (Broadcast)**
-1. User sends message → Frontend publishes to Supabase Broadcast channel
-2. Agent server receives message via Broadcast subscription
-3. Claude processes and responds
-4. Server publishes response to Broadcast channel
-5. Frontend receives and displays response
+## Sandbox Architecture
 
-**Database Sync (Postgres Changes)**
-1. Agent modifies todos via MCP tools → Supabase DB updated
-2. Supabase Realtime detects change → publishes Postgres Changes event
-3. Frontend receives event → TanStack Query invalidates cache → UI refreshes
+The agent code runs inside Cloudflare Sandboxes (secure containers). To enable fast PR preview deployments, the sandbox scripts are **bundled at build time and injected at runtime**:
+
+```
+worker/sandbox/src/*.ts  →  prebuild (esbuild)  →  src/sandbox-bundle.json  →  worker bundle
+                                                         ↓
+                                               sandbox.writeFile() at runtime
+```
+
+### Why Runtime Script Injection?
+
+When deploying PR preview environments, each PR needs its own isolated worker. However, if we baked the agent scripts into the Docker image:
+
+1. **Each PR would need a unique container image** - slow to build and deploy
+2. **Container class names would need to be unique per PR** - complex configuration
+3. **Cloudflare's DO namespace binding** makes sharing containers across workers difficult
+
+By injecting scripts at runtime instead:
+
+- **Single shared container image** - only contains Node.js and npm dependencies
+- **Same container class (`AgentSandbox`)** works across all environments
+- **PR-specific code** is bundled into each worker and injected via `sandbox.writeFile()`
+- **Faster deploys** - container image only rebuilds when dependencies change
+- **Simpler CI/CD** - no need to manipulate class names or create unique images
+
+The trade-off is a small overhead (~10KB) to write the script on each sandbox start, which is negligible compared to container cold-start times.
 
 ## Prerequisites
 
-- Node.js 18+
-- Docker (for local Supabase)
+- Node.js 20+
+- Docker (for local Supabase and Cloudflare Sandboxes)
 - Anthropic API key
+- Cloudflare account (for deployment)
 
-## Setup
+## Local Development
 
 ### 1. Install Dependencies
 
@@ -94,8 +87,8 @@ flowchart TB
 # Frontend dependencies
 npm install
 
-# Server dependencies
-cd server && npm install && cd ..
+# Worker dependencies
+cd worker && npm install && cd ..
 ```
 
 ### 2. Start Supabase
@@ -113,41 +106,34 @@ Create `.env` in the project root:
 ```env
 VITE_SUPABASE_URL=http://127.0.0.1:54321
 VITE_SUPABASE_ANON_KEY=<your-anon-key>
+VITE_CLOUDFLARE_WORKER_URL=http://localhost:8787
 ```
 
-Create `server/.env`:
-
-```env
-ANTHROPIC_API_KEY=<your-anthropic-api-key>
-SUPABASE_URL=http://127.0.0.1:54321
-SUPABASE_ANON_KEY=<your-anon-key>
-```
-
-### 4. Run Database Migrations
-
-Migrations run automatically when Supabase starts. To reset:
+Set worker secrets:
 
 ```bash
-npx supabase db reset
+cd worker
+echo "ANTHROPIC_API_KEY" | npx wrangler secret put ANTHROPIC_API_KEY
+echo "http://127.0.0.1:54321" | npx wrangler secret put SUPABASE_URL
+echo "<your-anon-key>" | npx wrangler secret put SUPABASE_ANON_KEY
 ```
 
-## Running the App
+### 4. Run the App
 
-### Start the Agent Server
+Start the worker (includes prebuild step):
 
 ```bash
-cd server && npm run dev
+cd worker && npm run dev
 ```
 
-Server runs on `http://localhost:3001`
-
-### Start the Frontend
+Start the frontend:
 
 ```bash
 npm run dev
 ```
 
-Frontend runs on `http://localhost:5173`
+- Frontend: `http://localhost:5173`
+- Worker: `http://localhost:8787`
 
 ## MCP Tools
 
@@ -160,35 +146,52 @@ The AI agent has access to these tools for managing todos:
 | `DeleteTodo` | Delete a todo by ID |
 | `ToggleTodo` | Mark a todo as complete or incomplete |
 
-## Usage
+## Deployment
 
-1. **Todos Tab**: Manually create and manage todos with categories
-2. **Chat Tab**: Talk to the AI agent to manage todos:
-   - "Show me all my todos"
-   - "Add a todo to buy groceries"
-   - "Mark the first todo as complete"
-   - "Delete all completed todos"
+### GitHub Actions
+
+The repo includes workflows for:
+
+- **`deploy-dev.yml`** - Deploys to dev environment on push to `main`
+- **`deploy-preview.yml`** - Creates ephemeral PR preview environments
+- **`cleanup-preview.yml`** - Cleans up preview environments when PRs close
+
+### PR Preview Environments
+
+Each PR automatically gets:
+- Isolated Supabase database branch (`pr-{number}`)
+- Isolated R2 bucket (`chat-sessions-pr-{number}`)
+- Dedicated worker deployment (`worker-pr-{number}`)
+
+All resources are cleaned up when the PR is closed.
 
 ## Project Structure
 
 ```
 .
-├── src/
-│   ├── components/       # React components
-│   ├── hooks/            # Custom hooks (useTodos, useCategories, useChat, useRealtimeSync)
-│   ├── lib/              # Supabase client
-│   ├── types/            # TypeScript types
-│   └── App.tsx           # Main app component
-├── server/
-│   ├── index.ts          # Agent server with Claude Agent SDK
-│   └── tools.ts          # MCP tool definitions
+├── src/                      # Frontend React app
+│   ├── components/           # React components
+│   ├── hooks/                # Custom hooks
+│   └── pages/                # Page components
+├── worker/                   # Cloudflare Worker
+│   ├── src/index.ts          # Worker entry point
+│   ├── sandbox/              # Agent code (TypeScript)
+│   │   ├── src/agent.ts      # Unified agent (interactive + non-interactive)
+│   │   ├── src/channel.ts    # Supabase Realtime communication
+│   │   ├── src/messages.ts   # Message formatting
+│   │   └── src/tools.ts      # MCP tool definitions
+│   ├── scripts/              # Build scripts
+│   │   └── bundle-sandbox.ts # Prebuild script (esbuild)
+│   ├── Dockerfile            # Sandbox container (deps only)
+│   └── wrangler.jsonc        # Cloudflare configuration
 ├── supabase/
-│   └── migrations/       # Database migrations
-└── package.json
+│   └── migrations/           # Database migrations
+└── .github/workflows/        # CI/CD pipelines
 ```
 
 ## Development Notes
 
-- **Zod Version**: The Claude Agent SDK requires Zod v3 (not v4). The server uses `zod@3`.
-- **Tool Permissions**: MCP tools use explicit `allowedTools` array for security.
-- **Session Management**: Chat sessions are maintained using the SDK's `resume` option.
+- **Zod Version**: The Claude Agent SDK requires Zod v3 (not v4)
+- **Prebuild Required**: Run `npm run prebuild` in `/worker` to generate `sandbox-bundle.json`
+- **Docker Required**: Cloudflare Sandboxes require Docker for local development
+- **Separate node_modules**: Frontend, worker, and sandbox have independent dependencies

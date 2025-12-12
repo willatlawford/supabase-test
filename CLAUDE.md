@@ -13,9 +13,9 @@ npm run lint     # ESLint
 
 ### Cloudflare Worker (`/worker`)
 ```bash
-cd worker && npm run dev   # Start worker + container (localhost:8789)
+cd worker && npm run dev   # Start worker + sandbox (localhost:8789)
 ```
-**Note**: Docker must be running for containers to work.
+**Note**: Docker must be running for sandboxes to work.
 
 ### Supabase
 ```bash
@@ -29,39 +29,57 @@ npx supabase db reset # Reset database and rerun migrations
 This is a todo app with an AI chat agent that can manage todos. It has four main parts:
 
 1. **Frontend** (`/src`) - React + TanStack Query + Tailwind CSS v4
-2. **Cloudflare Worker** (`/worker/src/index.ts`) - Auth verification, WebSocket forwarding
-3. **Agent Container** (`/worker/sandbox/`) - Claude Agent SDK with MCP tools
+2. **Cloudflare Worker** (`/worker/src/index.ts`) - Auth verification, HTTP API, sandbox orchestration
+3. **Agent Sandbox** (`/worker/sandbox/`) - Claude Agent SDK with MCP tools
 4. **Database** (`/supabase`) - PostgreSQL via Supabase
 
-### Chat Architecture
+### Communication Architecture
 
 ```
-Frontend (React) <--WebSocket--> Cloudflare Worker <--WebSocket--> Container (Agent)
+Frontend (React) <--Supabase Realtime Channel--> Sandbox (Agent)
+                           ^
+                           |
+              Worker (triggers sandbox, keepalive, timeout)
 ```
 
-- **WebSocket connection** for bidirectional real-time chat
-- **Per-user containers** - each authenticated user gets their own container instance
-- **Container lifecycle** - sleeps after 5 minutes of inactivity, wakes on request
-- **Stale detection** - frontend detects dead connections after 45s of no heartbeat
-- **Manual reconnect** - user clicks button to reconnect (no auto-reconnect after disconnect)
+- **Supabase Realtime Channels** for bidirectional messaging between frontend and agent
+- **Per-session sandboxes** - each session gets its own sandbox instance
+- **Two modes**: Interactive (Chat) and Non-interactive (Prompt)
+- **Interactive sandbox lifecycle** - sleeps after 1 minute, keepalive resets timer
+- **Prompt sandbox lifecycle** - sleeps after 30 minutes, destroyed after 5 min inactivity
 
 ### Key Files
 
 #### Worker (`/worker`)
-- `src/index.ts` - Cloudflare Worker entry, JWT auth via Supabase, WebSocket forwarding to container
-- `sandbox/server.js` - Agent server with WebSocket, Claude Agent SDK, MCP tools
-- `sandbox/package.json` - Container dependencies (claude-agent-sdk, ws, zod)
-- `wrangler.jsonc` - Cloudflare configuration (containers, R2, durable objects)
-- `Dockerfile` - Container image based on `cloudflare/sandbox`
+- `src/index.ts` - Cloudflare Worker entry, JWT auth, HTTP endpoints, script injection
+- `src/sandbox-bundle.json` - Generated bundle (gitignored, created by prebuild)
+- `sandbox/src/agent.ts` - Unified agent (handles interactive + non-interactive modes via `config.mode`)
+- `sandbox/src/channel.ts` - AgentChannel class for Supabase Realtime communication
+- `sandbox/src/messages.ts` - Message type definitions and formatters
+- `sandbox/src/tools.ts` - MCP tool definitions (ListTodos, AddTodo, etc.)
+- `sandbox/package.json` - Runtime dependencies (claude-agent-sdk, supabase-js, zod, ws)
+- `sandbox/tsconfig.json` - TypeScript config for sandbox code
+- `scripts/bundle-sandbox.ts` - Prebuild script (esbuild bundles sandbox TS → JSON)
+- `wrangler.jsonc` - Cloudflare configuration (sandboxes, R2, durable objects, environments)
+- `Dockerfile` - Sandbox image (deps only, scripts injected at runtime)
 
 #### Frontend (`/src`)
-- `hooks/useChat.ts` - WebSocket connection management, stale detection, reconnection logic
-- `components/Chat.tsx` - Chat UI with connection status indicator and reconnect banner
-- `components/ChatInput.tsx` - Message input with loading/disabled states
+- `hooks/useChannel.ts` - Supabase Realtime channel communication hook
+- `hooks/useChat.ts` - Interactive chat hook (uses useChannel)
+- `hooks/usePrompt.ts` - Non-interactive prompt hook (uses useChannel)
+- `components/Chat.tsx` - Interactive chat UI
+- `pages/PromptPage.tsx` - Non-interactive prompt UI
+- `components/MessageList.tsx` - Shared message display component
 - `hooks/useRealtimeSync.ts` - Postgres Changes listener for TanStack Query invalidation
 - `hooks/useTodos.ts`, `hooks/useCategories.ts` - TanStack Query hooks for Supabase
 
-### MCP Tools (defined in `worker/sandbox/server.js`)
+### API Endpoints
+
+- `POST /api/agent/start` - Start interactive session (requires `sessionId`)
+- `POST /api/agent/prompt` - Start non-interactive session (requires `sessionId`, `prompt`)
+- `POST /api/agent/keepalive` - Reset sandbox sleep timer (requires `sessionId`)
+
+### MCP Tools (defined in `worker/sandbox/src/tools.ts`)
 - `ListTodos` - List todos with optional filters
 - `AddTodo` - Create a new todo
 - `DeleteTodo` - Delete a todo by ID
@@ -69,6 +87,9 @@ Frontend (React) <--WebSocket--> Cloudflare Worker <--WebSocket--> Container (Ag
 
 ## Important Notes
 
-- **Zod version**: Container uses Zod v3 (required by Claude Agent SDK), not v4
+- **Runtime script injection**: Sandbox scripts are bundled at build time and injected via `sandbox.writeFile()` at runtime. This enables shared container images across PR preview environments.
+- **Prebuild required**: Run `npm run prebuild` (or `npm run dev`/`npm run deploy`) to generate `sandbox-bundle.json`
+- **Zod version**: Sandbox uses Zod v3 (required by Claude Agent SDK), not v4
 - **Separate node_modules**: Frontend, worker, and sandbox have independent dependencies
 - **Environment variables**: Worker needs `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `ANTHROPIC_API_KEY`
+- **Channel naming**: Uses sessionId only (UUID generated by frontend)

@@ -1,0 +1,191 @@
+name: Deploy Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  create-preview:
+    runs-on: ubuntu-latest
+    outputs:
+      branch_url: ${{ steps.branch.outputs.url }}
+      branch_anon_key: ${{ steps.branch.outputs.anon_key }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link project
+        run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Create preview branch
+        id: branch
+        run: |
+          # Create ephemeral branch named after PR number (ignore error if already exists)
+          supabase branches create pr-${{ github.event.pull_request.number }} \
+            --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} || true
+
+          # Get branch details
+          BRANCH_INFO=$(supabase branches get pr-${{ github.event.pull_request.number }} \
+            --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} --output json)
+
+          echo "url=$(echo $BRANCH_INFO | jq -r '.api_url')" >> $GITHUB_OUTPUT
+          echo "anon_key=$(echo $BRANCH_INFO | jq -r '.anon_key')" >> $GITHUB_OUTPUT
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Wait for branch to be ready
+        run: |
+          for i in {1..30}; do
+            STATUS=$(supabase branches get pr-${{ github.event.pull_request.number }} \
+              --project-ref ${{ secrets.SUPABASE_PROJECT_REF }} --output json | jq -r '.status')
+            if [ "$STATUS" = "ACTIVE_HEALTHY" ]; then
+              echo "Branch is ready"
+              exit 0
+            fi
+            echo "Waiting for branch... ($i/30)"
+            sleep 10
+          done
+          echo "Branch not ready in time"
+          exit 1
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+  deploy-preview:
+    runs-on: ubuntu-latest
+    needs: create-preview
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ needs.create-preview.outputs.branch_url }}
+          VITE_SUPABASE_ANON_KEY: ${{ needs.create-preview.outputs.branch_anon_key }}
+          VITE_CLOUDFLARE_WORKER_URL: https://worker-pr-${{ github.event.pull_request.number }}.${{ secrets.CLOUDFLARE_SUBDOMAIN }}.workers.dev
+
+      - name: Install worker dependencies
+        working-directory: worker
+        run: npm ci
+
+      - name: Build sandbox bundle
+        working-directory: worker
+        run: npm run prebuild
+
+      - name: Create R2 bucket for preview
+        uses: cloudflare/wrangler-action@v3
+        with:
+          workingDirectory: worker
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: r2 bucket create chat-sessions-pr-${{ github.event.pull_request.number }}
+        continue-on-error: true
+
+      - name: Configure PR environment
+        working-directory: worker
+        run: |
+          PR_NUM=${{ github.event.pull_request.number }}
+
+          # Add environment to wrangler.jsonc
+          # With runtime script injection, we can share the same container class across all PRs
+          jq --arg pr "$PR_NUM" '
+            .env["pr-" + $pr] = {
+              "name": "worker-pr-" + $pr,
+              "vars": { "ENVIRONMENT": "pr-" + $pr },
+              "containers": [{
+                "class_name": "AgentSandbox",
+                "image": "./Dockerfile",
+                "instance_type": "standard-1",
+                "max_instances": 3
+              }],
+              "r2_buckets": [{
+                "binding": "SESSION_STORAGE",
+                "bucket_name": "chat-sessions-pr-" + $pr
+              }],
+              "durable_objects": {
+                "bindings": [{
+                  "class_name": "AgentSandbox",
+                  "name": "SANDBOX"
+                }]
+              },
+              "migrations": [{
+                "new_sqlite_classes": ["AgentSandbox"],
+                "tag": "v1"
+              }]
+            }
+          ' wrangler.jsonc > wrangler.tmp.jsonc && mv wrangler.tmp.jsonc wrangler.jsonc
+
+      - name: Deploy Worker (preview)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          workingDirectory: worker
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --env pr-${{ github.event.pull_request.number }}
+          secrets: |
+            ANTHROPIC_API_KEY
+            SUPABASE_URL
+            SUPABASE_ANON_KEY
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ needs.create-preview.outputs.branch_url }}
+          SUPABASE_ANON_KEY: ${{ needs.create-preview.outputs.branch_anon_key }}
+
+      - name: Comment PR with preview URL
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.issue.number;
+            const subdomain = '${{ secrets.CLOUDFLARE_SUBDOMAIN }}';
+            const supabaseUrl = '${{ needs.create-preview.outputs.branch_url }}';
+
+            // Find existing comment to update
+            const { data: comments } = await github.rest.issues.listComments({
+              issue_number: prNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Preview Deployed')
+            );
+
+            const body = `## Preview Deployed
+
+            | Resource | URL |
+            |----------|-----|
+            | **App** | https://worker-pr-${prNumber}.${subdomain}.workers.dev |
+            | **Supabase** | ${supabaseUrl} |
+
+            _Updated: ${new Date().toISOString()}_`;
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                comment_id: botComment.id,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: prNumber,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body
+              });
+            }

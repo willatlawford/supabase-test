@@ -3,17 +3,21 @@
 	"version": "1.0.0",
 	"type": "module",
 	"private": true,
-	"description": "Chat agent worker with Cloudflare Containers",
+	"description": "Chat agent worker with Cloudflare Sandboxes",
 	"scripts": {
-		"deploy": "wrangler deploy",
-		"dev": "wrangler dev",
-		"start": "wrangler dev",
+		"prebuild": "npx tsx scripts/bundle-sandbox.ts",
+		"build": "npm run prebuild",
+		"deploy": "npm run prebuild && wrangler deploy",
+		"dev": "npm run prebuild && wrangler dev",
+		"start": "npm run prebuild && wrangler dev",
 		"cf-typegen": "wrangler types",
 		"typecheck": "tsc --noEmit"
 	},
 	"devDependencies": {
-		"@cloudflare/containers": "*",
+		"@cloudflare/sandbox": "^0.6.3",
 		"@types/node": "^24.10.1",
+		"esbuild": "^0.24.0",
+		"tsx": "^4.19.0",
 		"typescript": "^5.9.3",
 		"wrangler": "^4.52.1"
 	},
