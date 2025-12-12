@@ -104,8 +104,8 @@ jobs:
           PR_NUM=${{ github.event.pull_request.number }}
 
           # Add environment to wrangler.jsonc
-          # With runtime script injection, we can share the same container class across all PRs
-          jq --arg pr "$PR_NUM" '
+          # Convert JSONC to JSON (strips comments), add PR env, output as JSON
+          npx json5 wrangler.jsonc | jq --arg pr "$PR_NUM" '
             .env["pr-" + $pr] = {
               "name": ("worker-pr-" + $pr),
               "vars": { "ENVIRONMENT": ("pr-" + $pr) },
@@ -130,7 +130,7 @@ jobs:
                 "tag": "v1"
               }]
             }
-          ' wrangler.jsonc > wrangler.tmp.jsonc && mv wrangler.tmp.jsonc wrangler.jsonc
+          ' > wrangler.tmp.json && mv wrangler.tmp.json wrangler.jsonc
 
       - name: Deploy secrets (preview)
         working-directory: worker
