@@ -130,6 +130,11 @@ jobs:
             }
           ' wrangler.jsonc > wrangler.tmp.jsonc && mv wrangler.tmp.jsonc wrangler.jsonc
 
+      - name: Deploy secrets (preview)
+        working-directory: worker
+        run: |
+          echo '{"ANTHROPIC_API_KEY":"${{ secrets.ANTHROPIC_API_KEY }}","SUPABASE_URL":"${{ needs.create-preview.outputs.branch_url }}","SUPABASE_ANON_KEY":"${{ needs.create-preview.outputs.branch_anon_key }}"}' | npx wrangler secret bulk --env pr-${{ github.event.pull_request.number }}
+
       - name: Deploy Worker (preview)
         uses: cloudflare/wrangler-action@v3
         with:
@@ -137,14 +142,6 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy --env pr-${{ github.event.pull_request.number }}
-          secrets: |
-            ANTHROPIC_API_KEY
-            SUPABASE_URL
-            SUPABASE_ANON_KEY
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SUPABASE_URL: ${{ needs.create-preview.outputs.branch_url }}
-          SUPABASE_ANON_KEY: ${{ needs.create-preview.outputs.branch_anon_key }}
 
       - name: Comment PR with preview URL
         uses: actions/github-script@v7

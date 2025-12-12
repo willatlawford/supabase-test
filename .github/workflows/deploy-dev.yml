@@ -56,6 +56,11 @@ jobs:
         working-directory: worker
         run: npm run prebuild
 
+      - name: Deploy secrets (dev)
+        working-directory: worker
+        run: |
+          echo '{"ANTHROPIC_API_KEY":"${{ secrets.ANTHROPIC_API_KEY }}","SUPABASE_URL":"https://${{ secrets.SUPABASE_PROJECT_REF }}.supabase.co","SUPABASE_ANON_KEY":"${{ secrets.SUPABASE_ANON_KEY }}"}' | npx wrangler secret bulk --env dev
+
       - name: Deploy Worker (dev)
         uses: cloudflare/wrangler-action@v3
         with:
@@ -63,11 +68,3 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy --env dev
-          secrets: |
-            ANTHROPIC_API_KEY
-            SUPABASE_URL
-            SUPABASE_ANON_KEY
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SUPABASE_URL: https://${{ secrets.SUPABASE_PROJECT_REF }}.supabase.co
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
