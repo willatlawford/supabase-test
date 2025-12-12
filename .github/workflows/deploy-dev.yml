@@ -46,7 +46,7 @@ jobs:
         env:
           VITE_SUPABASE_URL: https://${{ secrets.SUPABASE_PROJECT_REF }}.supabase.co
           VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          VITE_CLOUDFLARE_WORKER_URL: https://worker.${{ secrets.CLOUDFLARE_SUBDOMAIN }}.workers.dev
+          VITE_CLOUDFLARE_WORKER_URL: https://worker-dev.${{ secrets.CLOUDFLARE_SUBDOMAIN }}.workers.dev
 
       - name: Install worker dependencies
         working-directory: worker
